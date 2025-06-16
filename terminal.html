@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>macOS Web Terminal - iOS</title>
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.3.0/css/xterm.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.7.0/lib/xterm-addon-fit.min.js"></script>
+    <style>
+        * {
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            touch-action: manipulation;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+            color: #0f0;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        #terminal-container {
+            position: fixed;
+            top: 30px;
+            left: 0;
+            right: 0;
+            bottom: 60px;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+        #terminal {
+            width: 100%;
+            height: 100%;
+        }
+        #ios-keyboard {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 60px;
+            background: #111;
+            border-top: 1px solid #0f0;
+            display: flex;
+            padding: 5px;
+            box-sizing: border-box;
+        }
+        .key {
+            flex: 1;
+            margin: 2px;
+            background: #222;
+            color: #0f0;
+            border: 1px solid #0f0;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            cursor: pointer;
+        }
+        #status-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 30px;
+            background: rgba(0, 50, 0, 0.8);
+            color: #0f0;
+            padding: 0 10px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            z-index: 100;
+        }
+        #loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            color: #0f0;
+        }
+        #loading-spinner {
+            border: 5px solid #0a0;
+            border-top: 5px solid #0f0;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        #loading-message {
+            margin-top: 20px;
+            text-align: center;
+            padding: 0 20px;
+        }
+        #progress-bar {
+            width: 300px;
+            height: 20px;
+            background: #222;
+            margin-top: 20px;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        #progress-fill {
+            height: 100%;
+            width: 0%;
+            background: #0f0;
+            transition: width 0.3s;
+        }
+        #progress-text {
+            margin-top: 10px;
+        }
+        .command-list {
+            position: absolute;
+            top: 40px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid #0f0;
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 300px;
+            display: none;
+            z-index: 100;
+            color: #0f0;
+            font-family: monospace;
+        }
+        .command-list.show {
+            display: block;
+        }
+        .command-list ul {
+            padding-left: 20px;
+            margin: 10px 0;
+        }
+        .command-list li {
+            margin-bottom: 8px;
+        }
+        #help-btn {
+            position: absolute;
+            top: 35px;
+            right: 10px;
+            background: #002200;
+            color: #0f0;
+            border: 1px solid #0f0;
+            border-radius: 4px;
+            padding: 5px 10px;
+            cursor: pointer;
+            z-index: 101;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading-overlay">
+        <div id="loading-spinner"></div>
+        <div id="loading-message">جاري التهيئة، يرجى الانتظار... قد يستغرق هذا بضع دقائق</div>
+        <div id="progress-bar">
+            <div id="progress-fill"></div>
+        </div>
+        <div id="progress-text">0%</div>
+    </div>
+    
+    <div id="status-bar">الحالة: جاري التهيئة...</div>
+    
+    <button id="help-btn">مساعدة</button>
+    <div id="command-list" class="command-list">
+        <h3 style="margin-top:0">قائمة الأوامر:</h3>
+        <ul>
+            <li><code>start-macos</code>: بدء تشغيل macOS</li>
+            <li><code>stop-macos</code>: إيقاف النظام</li>
+            <li><code>restart-macos</code>: إعادة التشغيل</li>
+            <li><code>install-python-git</code>: تثبيت Python و Git</li>
+            <li><code>run-install-script</code>: تشغيل سكريبت التثبيت</li>
+            <li><code>set-ram [حجم]</code>: تغيير حجم الذاكرة (MB)</li>
+            <li><code>create-snapshot</code>: إنشاء لقطة للنظام</li>
+            <li><code>restore-snapshot</code>: استعادة لقطة</li>
+            <li><code>list-snapshots</code>: عرض اللقطات المحفوظة</li>
+            <li><code>set-resolution [w]x[h]</code>: تغيير دقة الشاشة</li>
+            <li><code>help</code>: عرض قائمة الأوامر</li>
+            <li><code>Ctrl+L</code>: مسح الشاشة</li>
+            <li><code>neofetch</code>: عرض معلومات النظام</li>
+            <li><code>htop</code>: مراقبة العمليات</li>
+        </ul>
+    </div>
+    
+    <div id="terminal-container">
+        <div id="terminal"></div>
+    </div>
+    
+    <div id="ios-keyboard">
+        <div class="key" data-key="Tab">Tab</div>
+        <div class="key" data-key="Ctrl">Ctrl</div>
+        <div class="key" data-key="Alt">Alt</div>
+        <div class="key" data-key="↑">↑</div>
+        <div class="key" data-key="↓">↓</div>
+        <div class="key" data-key="←">←</div>
+        <div class="key" data-key="→">→</div>
+        <div class="key" data-key="Enter">Enter</div>
+    </div>
+
+    <script>
+        // ===== حلول توافق مع iOS =====
+        (function() {
+            if (!window.WebAssembly) {
+                alert('المتصفح لا يدعم WebAssembly! يرجى استخدام Safari 15+ أو Chrome 85+');
+            }
+
+            if (!window.Worker) {
+                alert('المتصفح لا يدعم Web Workers! يرجى تحديث المتصفح');
+            }
+
+            window.addEventListener('load', () => {
+                if (/iP(ad|hone|od)/i.test(navigator.userAgent)) {
+                    document.body.style.webkitTransform = 'translate3d(0,0,0)';
+                    document.body.style.overflow = 'hidden';
+                }
+            });
+
+            document.addEventListener('touchmove', (e) => {
+                if(e.scale !== 1) {
+                    e.preventDefault();
+                }
+            }, { passive: false });
+
+            if (navigator.deviceMemory < 4) {
+                alert('الجهاز لديه ذاكرة وصول عشوائي (RAM) منخفضة. قد لا يعمل النظام بشكل صحيح.');
+            }
+
+            WebAssembly.instantiateStreaming = async (response, importObject) => {
+                if (typeof response === 'function') {
+                    return WebAssembly.instantiate(response(), importObject);
+                }
+                return WebAssembly.instantiate(await response, importObject);
+            };
+
+            if (!window.requestIdleCallback) {
+                window.requestIdleCallback = (callback) => {
+                    return setTimeout(() => {
+                        callback({
+                            didTimeout: false,
+                            timeRemaining: () => 50
+                        });
+                    }, 1);
+                };
+                window.cancelIdleCallback = (id) => clearTimeout(id);
+            }
+        })();
+
+        // ===== إعدادات النظام الأساسية =====
+        const CONFIG = {
+            RAM_SIZE: 4096, // 4GB للتوافق مع iOS
+            CPU_CORES: 2,   // نواتين للتوافق
+            AUTO_SAVE_INTERVAL: 300000,
+            PERSISTENCE_KEY: 'macos-kvm-ios',
+            DEBUG_MODE: true,
+            KERNEL_URL: 'https://archive.org/download/minimal-linux-kernel/minimal-kernel-5.10.iso'
+        };
+
+        // ===== تهيئة التيرمينال =====
+        const term = new Terminal({
+            fontSize: 14,
+            fontFamily: 'Menlo, monospace',
+            cursorBlink: true,
+            theme: {
+                background: '#001100',
+                foreground: '#00ff00'
+            },
+            allowProposedApi: true
+        });
+        
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(document.getElementById('terminal'));
+        
+        // ===== متغيرات النظام =====
+        let driveHandle;
+        let dockerWorker;
+        let kvmWorker;
+        let resourceInterval;
+        let isSystemReady = false;
+
+        // ===== نظام تسجيل الأخطاء =====
+        const debugLog = (message, type = 'info') => {
+            const colors = {
+                info: '\x1b[36m',
+                success: '\x1b[32m',
+                warning: '\x1b[33m',
+                error: '\x1b[31m',
+                debug: '\x1b[35m'
+            };
+            const reset = '\x1b[0m';
+            const timestamp = new Date().toLocaleTimeString();
+            
+            if (CONFIG.DEBUG_MODE || type === 'error') {
+                term.writeln(`${colors[type]}[${timestamp}] ${message}${reset}`);
+            }
+            
+            if (type === 'error') {
+                console.error(`[${timestamp}] ${message}`);
+            }
+        };
+
+        // ===== وظائف مساعدة =====
+        function updateStatus(message) {
+            document.getElementById('status-bar').innerText = `الحالة: ${message}`;
+        }
+
+        function updateProgress(percent) {
+            document.getElementById('progress-fill').style.width = `${percent}%`;
+            document.getElementById('progress-text').innerText = `${percent}%`;
+        }
+
+        function hideLoadingOverlay() {
+            document.getElementById('loading-overlay').style.display = 'none';
+        }
+
+        function showLoadingMessage(message) {
+            document.getElementById('loading-message').innerText = message;
+        }
+
+        function setupIOSKeyboard() {
+            document.querySelectorAll('.key').forEach(key => {
+                key.addEventListener('click', () => {
+                    if (!isSystemReady) return;
+                    
+                    const keyValue = key.getAttribute('data-key');
+                    switch(keyValue) {
+                        case 'Tab': term.write('\t'); break;
+                        case 'Ctrl': term.write('\x11'); break;
+                        case 'Alt': term.write('\x12'); break;
+                        case '↑': term.write('\x1b[A'); break;
+                        case '↓': term.write('\x1b[B'); break;
+                        case '←': term.write('\x1b[D'); break;
+                        case '→': term.write('\x1b[C'); break;
+                        case 'Enter': term.write('\r'); break;
+                    }
+                });
+            });
+        }
+
+        function toggleCommandList() {
+            const list = document.getElementById('command-list');
+            list.classList.toggle('show');
+        }
+
+        // ===== تحميل النواة =====
+        async function loadKernel(url, progressCallback) {
+            return new Promise(async (resolve, reject) => {
+                try {
+                    const response = await fetch(url);
+                    if (!response.ok) {
+                        throw new Error(`فشل التحميل: ${response.status} ${response.statusText}`);
+                    }
+                    
+                    const contentLength = +response.headers.get('Content-Length');
+                    const reader = response.body.getReader();
+                    let receivedLength = 0;
+                    let chunks = [];
+                    
+                    while(true) {
+                        const {done, value} = await reader.read();
+                        
+                        if (done) break;
+                        
+                        chunks.push(value);
+                        receivedLength += value.length;
+                        
+                        if (contentLength) {
+                            const percent = Math.round((receivedLength / contentLength) * 100);
+                            progressCallback(percent);
+                        }
+                    }
+                    
+                    let chunksAll = new Uint8Array(receivedLength);
+                    let position = 0;
+                    for(let chunk of chunks) {
+                        chunksAll.set(chunk, position);
+                        position += chunk.length;
+                    }
+                    
+                    resolve(chunksAll);
+                } catch (error) {
+                    reject(error);
+                }
+            });
+        }
+
+        // ===== كود KVM Worker =====
+        function createKVMWorker() {
+            const kvmWorkerCode = `
+                self.importScripts('https://cdn.jsdelivr.net/npm/kvm-wasm@1.3.0/dist/kvm.ios.min.js');
+                
+                class KVMManager {
+                    constructor() {
+                        this.kvm = null;
+                        this.snapshots = [];
+                    }
+                
+                    async init(config) {
+                        try {
+                            self.postMessage({ type: 'status', message: 'جاري تهيئة KVM مع النواة...' });
+                            
+                            this.kvm = new KVMWASM({
+                                memory: config.memory,
+                                cores: config.cores,
+                                drive: config.drive,
+                                kernel: config.kernel,
+                                iosCompat: true
+                            });
+                
+                            await this.kvm.configure({
+                                cpu: {
+                                    model: 'penryn',
+                                    features: 'kvm=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt'
+                                },
+                                memory: {
+                                    size: config.memory,
+                                    slots: 2
+                                },
+                                boot: {
+                                    loader: 'grub',
+                                    kernelParams: 'console=ttyS0 root=/dev/vda1'
+                                }
+                            });
+                
+                            self.postMessage({ type: 'status', message: 'KVM جاهز' });
+                            self.postMessage({ type: 'kvm-ready' });
+                        } catch (error) {
+                            self.postMessage({ type: 'error', message: \`KVM Init Error: \${error.message}\` });
+                        }
+                    }
+                
+                    async createSnapshot(name) {
+                        try {
+                            const snapshot = await this.kvm.createSnapshot();
+                            this.snapshots.push({ name, date: new Date(), data: snapshot });
+                            self.postMessage({ type: 'snapshot-created', name });
+                        } catch (error) {
+                            self.postMessage({ type: 'error', message: \`Snapshot Error: \${error.message}\` });
+                        }
+                    }
+                
+                    async restoreSnapshot(name) {
+                        try {
+                            const snapshot = name === 'latest' 
+                                ? this.snapshots[this.snapshots.length - 1]
+                                : this.snapshots.find(s => s.name === name);
+                            
+                            if (!snapshot) throw new Error('اللقطة غير موجودة');
+                            
+                            await this.kvm.restoreSnapshot(snapshot.data);
+                            self.postMessage({ type: 'snapshot-restored', name: snapshot.name });
+                        } catch (error) {
+                            self.postMessage({ type: 'error', message: \`Restore Error: \${error.message}\` });
+                        }
+                    }
+                
+                    async setMemory(size) {
+                        try {
+                            if (size < 4096 || size > 16384) {
+                                throw new Error('الحجم غير صحيح (4096-16384)');
+                            }
+                            
+                            await this.kvm.setMemorySize(size);
+                            self.postMessage({ type: 'status', message: \`تم تغيير الذاكرة إلى \${size}MB\` });
+                        } catch (error) {
+                            self.postMessage({ type: 'error', message: \`Set Memory Error: \${error.message}\` });
+                        }
+                    }
+                
+                    async getResources() {
+                        try {
+                            if (this.kvm) {
+                                const resources = await this.kvm.getSystemResources();
+                                self.postMessage({ type: 'resources', ram: resources.memory.used, cpu: resources.cpu.usage });
+                            }
+                        } catch (error) {
+                            console.error('Resource monitoring error:', error);
+                        }
+                    }
+                
+                    listSnapshots() {
+                        self.postMessage({ type: 'snapshot-list', snapshots: this.snapshots });
+                    }
+                }
+                
+                const kvmManager = new KVMManager();
+                
+                self.onmessage = async (e) => {
+                    try {
+                        switch (e.data.type) {
+                            case 'init':
+                                await kvmManager.init(e.data.config);
+                                break;
+                            case 'snapshot':
+                                await kvmManager.createSnapshot(e.data.name);
+                                break;
+                            case 'restore':
+                                await kvmManager.restoreSnapshot(e.data.name);
+                                break;
+                            case 'set-ram':
+                                await kvmManager.setMemory(e.data.ram);
+                                break;
+                            case 'get-resources':
+                                await kvmManager.getResources();
+                                break;
+                            case 'list-snapshots':
+                                kvmManager.listSnapshots();
+                                break;
+                            default:
+                                self.postMessage({ type: 'error', message: \`Unknown command: \${e.data.type}\` });
+                        }
+                    } catch (error) {
+                        self.postMessage({ type: 'error', message: \`Worker Error: \${error.message}\` });
+                    }
+                };
+            `;
+            
+            const blob = new Blob([kvmWorkerCode], { type: 'application/javascript' });
+            return new Worker(URL.createObjectURL(blob));
+        }
+
+        // ===== كود Docker Worker =====
+        function createDockerWorker() {
+            const dockerWorkerCode = `
+                self.importScripts('https://cdn.jsdelivr.net/npm/docker-wasm@0.5.0/dist/docker.ios.min.js');
+                
+                class DockerManager {
+                    constructor() {
+                        this.docker = null;
+                        this.containerId = null;
+                    }
+                
+                    async init(config) {
+                        try {
+                            self.postMessage({ type: 'status', message: 'جاري تهيئة Docker...' });
+                            
+                            this.docker = new DockerWASM({
+                                resourceLimits: {
+                                    memory: 4096,
+                                    cpuQuota: 50000
+                                },
+                                volumes: config.volumes,
+                                iosCompat: true
+                            });
+                
+                            self.postMessage({ type: 'docker-ready' });
+                        } catch (error) {
+                            self.postMessage({ type: 'error', message: \`Docker Init Error: \${error.message}\` });
+                        }
+                    }
+                
+                    async runContainer(containerConfig) {
+                        try {
+                            self.postMessage({ type: 'status', message: 'جاري تشغيل macOS...' });
+                            
+                            const modifiedConfig = {
+                                ...containerConfig,
+                                options: {
+                                    ...containerConfig.options,
+                                    kernel: {
+                                        image: containerConfig.env.KERNEL_IMAGE,
+                                        bootloader: containerConfig.env.BOOT_LOADER,
+                                        params: containerConfig.env.KERNEL_PARAMS
+                                    }
+                                }
+                            };
+                            
+                            const output = await this.docker.runContainer(modifiedConfig);
+                            this.containerId = output.containerId;
+                            
+                            self.postMessage({ type: 'output', content: output.logs });
+                            self.postMessage({ type: 'status', message: 'macOS يعمل الآن' });
+                            
+                            try {
+                                await this.docker.execCommand(this.containerId, 'chmod +x /install_essentials.sh');
+                                const installOutput = await this.docker.execCommand(this.containerId, '/install_essentials.sh');
+                                self.postMessage({ type: 'output', content: installOutput });
+                                
+                                if (installOutput.includes('Python')) {
+                                    self.postMessage({ type: 'python-installed' });
+                                }
+                                if (installOutput.includes('Git')) {
+                                    self.postMessage({ type: 'git-installed' });
+                                }
+                            } catch (installError) {
+                                self.postMessage({ type: 'error', message: \`Install Error: \${installError.message}\` });
+                            }
+                        } catch (error) {
+                            self.postMessage({ type: 'error', message: \`Run Error: \${error.message}\` });
+                        }
+                    }
+                
+                    async handleInput(data) {
+                        if (!this.containerId) return;
+                        await this.docker.sendInput(this.containerId, data);
+                    }
+                
+                    async stopContainer() {
+                        if (!this.containerId) return;
+                        await this.docker.stopContainer(this.containerId);
+                        self.postMessage({ type: 'status', message: 'تم إيقاف macOS' });
+                    }
+                
+                    async restartContainer() {
+                        if (!this.containerId) return;
+                        await this.docker.restartContainer(this.containerId);
+                        self.postMessage({ type: 'status', message: 'جاري إعادة التشغيل' });
+                    }
+                
+                    async runCommand(command) {
+                        if (!this.containerId) return;
+                        const output = await this.docker.execCommand(this.containerId, command);
+                        self.postMessage({ type: 'output', content: output });
+                    }
+                }
+                
+                const dockerManager = new DockerManager();
+                
+                self.onmessage = async (e) => {
+                    try {
+                        switch (e.data.type) {
+                            case 'init':
+                                await dockerManager.init(e.data.config);
+                                break;
+                            case 'run':
+                                await dockerManager.runContainer(e.data.container);
+                                break;
+                            case 'input':
+                                await dockerManager.handleInput(e.data.data);
+                                break;
+                            case 'stop':
+                                await dockerManager.stopContainer();
+                                break;
+                            case 'restart':
+                                await dockerManager.restartContainer();
+                                break;
+                            case 'run-command':
+                                await dockerManager.runCommand(e.data.command);
+                                break;
+                            default:
+                                self.postMessage({ type: 'error', message: \`Unknown command: \${e.data.type}\` });
+                        }
+                    } catch (error) {
+                        self.postMessage({ type: 'error', message: \`Worker Error: \${error.message}\` });
+                    }
+                };
+            `;
+            
+            const blob = new Blob([dockerWorkerCode], { type: 'application/javascript' });
+            return new Worker(URL.createObjectURL(blob));
+        }
+
+        // ===== اتصال Google Drive =====
+        async function connectGoogleDrive() {
+            try {
+                debugLog('🌐 جاري الاتصال بجوجل درايف...', 'info');
+                showLoadingMessage('جاري طلب إذن الوصول إلى Google Drive...');
+                
+                if (!window.showDirectoryPicker) {
+                    throw new Error('المتصفح لا يدعم واجهة نظام الملفات');
+                }
+                
+                driveHandle = await window.showDirectoryPicker();
+                const root = await driveHandle.resolve();
+                
+                const folders = ['macos_data', 'docker_config', 'system_files', 'snapshots'];
+                for (const folder of folders) {
+                    try {
+                        await root.getDirectoryHandle(folder, { create: true });
+                        debugLog(`تم إنشاء مجلد: ${folder}`, 'success');
+                    } catch (error) {
+                        debugLog(`خطأ في إنشاء مجلد ${folder}: ${error.message}`, 'warning');
+                    }
+                }
+                
+                debugLog('✅ تم الاتصال بجوجل درايف بنجاح!', 'success');
+                updateStatus('متصـل بجوجل درايف');
+                return true;
+            } catch (error) {
+                debugLog(`❌ فشل الاتصال بجوجل درايف: ${error.message}`, 'error');
+                updateStatus('خطأ في الاتصال');
+                return false;
+            }
+        }
+
+        // ===== تحميل Linux Kernel ISO =====
+        async function loadLinuxKernel() {
+            try {
+                debugLog('جاري تحميل Linux Kernel ISO...', 'info');
+                showLoadingMessage('جاري تحميل نواة النظام (100MB)...');
+                
+                const kernelData = await loadKernel(CONFIG.KERNEL_URL, updateProgress);
+                
+                const root = await driveHandle.resolve();
+                const fileHandle = await root.getFileHandle('linux-kernel.iso', { create: true });
+                const writable = await fileHandle.createWritable();
+                await writable.write(kernelData);
+                await writable.close();
+                
+                debugLog('✅ تم تحميل Linux Kernel ISO بنجاح!', 'success');
+                return true;
+            } catch (error) {
+                debugLog(`❌ فشل تحميل Linux Kernel: ${error.message}`, 'error');
+                showLoadingMessage(`خطأ: ${error.message}`);
+                return false;
+            }
+        }
+
+        // ===== إعداد KVM =====
+        async function setupKVM() {
+            try {
+                debugLog('⚙️ جاري تهيئة KVM...', 'info');
+                showLoadingMessage('جاري تهيئة المحاكاة الافتراضية...');
+                
+                kvmWorker = createKVMWorker();
+                
+                kvmWorker.onmessage = (e) => {
+                    if (e.data.type === 'output') {
+                        term.write(e.data.content);
+                    } else if (e.data.type === 'status') {
+                        updateStatus(e.data.message);
+                    } else if (e.data.type === 'error') {
+                        debugLog(`❌ ${e.data.message}`, 'error');
+                    } else if (e.data.type === 'kvm-ready') {
+                        debugLog('✅ KVM جاهز لتشغيل macOS!', 'success');
+                        setupDocker();
+                    } else if (e.data.type === 'resources') {
+                        updateResources(e.data.ram, e.data.cpu);
+                    } else if (e.data.type === 'snapshot-created') {
+                        term.writeln(`\x1b[32m✅ تم إنشاء اللقطة: ${e.data.name}\x1b[0m`);
+                    } else if (e.data.type === 'snapshot-restored') {
+                        term.writeln(`\x1b[32m✅ تم استعادة اللقطة: ${e.data.name}\x1b[0m`);
+                    } else if (e.data.type === 'snapshot-list') {
+                        term.writeln('\x1b[33m📋 اللقطات المتاحة:\x1b[0m');
+                        e.data.snapshots.forEach(snap => {
+                            term.writeln(`- ${snap.name} (${new Date(snap.date).toLocaleString()})`);
+                        });
+                    }
+                };
+                
+                kvmWorker.postMessage({
+                    type: 'init',
+                    config: {
+                        memory: CONFIG.RAM_SIZE,
+                        cores: CONFIG.CPU_CORES,
+                        drive: 'macos_data',
+                        kernel: 'linux-kernel.iso'
+                    }
+                });
+                
+                return true;
+            } catch (error) {
+                debugLog(`❌ فشل تهيئة KVM: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        // ===== إعداد Docker =====
+        function setupDocker() {
+            try {
+                debugLog('🐳 جاري تهيئة Docker...', 'info');
+                showLoadingMessage('جاري تهيئة حاويات Docker...');
+                
+                dockerWorker = createDockerWorker();
+                
+                dockerWorker.onmessage = (e) => {
+                    if (e.data.type === 'output') {
+                        term.write(e.data.content);
+                    } else if (e.data.type === 'status') {
+                        updateStatus(e.data.message);
+                    } else if (e.data.type === 'error') {
+                        debugLog(`❌ ${e.data.message}`, 'error');
+                    } else if (e.data.type === 'docker-ready') {
+                        debugLog('✅ Docker جاهز لتشغيل macOS!', 'success');
+                        isSystemReady = true;
+                        hideLoadingOverlay();
+                        fitAddon.fit();
+                        term.focus();
+                        term.writeln('\x1b[32m✅ النظام جاهز للتشغيل!\x1b[0m');
+                        term.writeln('\x1b[33m📝 اكتب "start-macos" لبدء تشغيل macOS\x1b[0m');
+                    } else if (e.data.type === 'python-installed') {
+                        term.writeln('\x1b[32m✅ تم تثبيت Python بنجاح!\x1b[0m');
+                    } else if (e.data.type === 'git-installed') {
+                        term.writeln('\x1b[32m✅ تم تثبيت Git بنجاح!\x1b[0m');
+                    }
+                };
+                
+                dockerWorker.postMessage({
+                    type: 'init',
+                    config: {
+                        volumes: {
+                            '/macos_data': 'macos_data',
+                            '/docker_config': 'docker_config'
+                        }
+                    }
+                });
+                
+                return true;
+            } catch (error) {
+                debugLog(`❌ فشل إعداد Docker: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        // ===== تشغيل macOS =====
+        function startMacOS() {
+            const dockerCommand = {
+                image: 'sickcodes/docker-osx:auto',
+                command: 'run -it',
+                options: {
+                    devices: ['/dev/kvm'],
+                    ports: {'10022': '50922'},
+                    volumes: {
+                        '/tmp/.X11-unix': '/tmp/.X11-unix',
+                        '/macos_data': '/data',
+                        '/macos_data/linux-kernel.iso': '/kernel.iso'
+                    },
+                    env: {
+                        GENERATE_UNIQUE: 'true',
+                        RAM_SIZE: CONFIG.RAM_SIZE.toString(),
+                        CPU_CORES: CONFIG.CPU_CORES.toString(),
+                        OSX_VERSION: 'ventura',
+                        BOOT_ARGS: 'keepsyms=1 -v',
+                        KERNEL_IMAGE: '/kernel.iso',
+                        BOOT_LOADER: 'grub',
+                        KERNEL_PARAMS: 'console=ttyS0 root=/dev/vda1'
+                    },
+                    postRun: [
+                        'chmod +x /install_essentials.sh',
+                        '/install_essentials.sh'
+                    ]
+                }
+            };
+            
+            dockerWorker.postMessage({
+                type: 'run',
+                container: dockerCommand
+            });
+        }
+
+        // ===== تثبيت Python و Git =====
+        async function installEssentials() {
+            try {
+                debugLog('🐍 جاري تثبيت Python و Git...', 'info');
+                
+                const installScript = `#!/bin/bash
+
+echo "جاري التثبيت، يرجى الانتظار..."
+
+# تثبيت Xcode Command Line Tools
+xcode-select --install
+
+# تثبيت Homebrew
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# إعداد المسارات
+echo 'export PATH="/opt/homebrew/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+
+# تثبيت Python و Git
+brew install python@3.11 git
+
+# تثبيت أدوات إضافية
+brew install wget curl htop neofetch
+
+# التحقق من الإصدارات
+echo "Python: \$(python3 --version)"
+echo "Git: \$(git --version)"
+echo "Wget: \$(wget --version | head -n1)"
+echo "Curl: \$(curl --version | head -n1)"
+
+echo "✅ تم تثبيت الأساسيات بنجاح!"
+`;
+                const root = await driveHandle.resolve();
+                const fileHandle = await root.getFileHandle('install_essentials.sh', { create: true });
+                const writable = await fileHandle.createWritable();
+                await writable.write(installScript);
+                await writable.close();
+                
+                debugLog('✅ تم إنشاء سكريبت التثبيت!', 'success');
+                return true;
+            } catch (error) {
+                debugLog(`❌ خطأ في تثبيت الأساسيات: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        // ===== نظام الحفظ التلقائي =====
+        function setupAutoSave() {
+            setInterval(() => {
+                term.write('\x1b[33m[جاري الحفظ التلقائي...]\x1b[0m');
+                kvmWorker.postMessage({type: 'snapshot', name: `autosave-${Date.now()}`});
+                saveSessionState();
+            }, CONFIG.AUTO_SAVE_INTERVAL);
+        }
+
+        // ===== استمرارية الجلسة =====
+        function saveSessionState() {
+            const state = {
+                timestamp: new Date().toISOString(),
+                ramUsage: document.getElementById('resource-monitor')?.innerText || 'N/A'
+            };
+            localStorage.setItem(CONFIG.PERSISTENCE_KEY, JSON.stringify(state));
+        }
+
+        function restoreSessionState() {
+            const savedState = localStorage.getItem(CONFIG.PERSISTENCE_KEY);
+            if (savedState) {
+                const state = JSON.parse(savedState);
+                term.writeln(`\x1b[33m⏱️ تم استعادة الجلسة السابقة: ${state.timestamp}\x1b[0m`);
+                term.writeln(`\x1b[33m💾 حالة الموارد: ${state.ramUsage}\x1b[0m`);
+            }
+        }
+
+        // ===== مراقبة الموارد =====
+        function startResourceMonitoring() {
+            setInterval(() => {
+                if (kvmWorker) {
+                    kvmWorker.postMessage({type: 'get-resources'});
+                }
+            }, 5000);
+        }
+
+        function updateResources(ram, cpu) {
+            const ramGB = (ram / 1024).toFixed(1);
+            document.getElementById('resource-monitor').innerText = 
+                `RAM: ${ramGB}GB/4GB | CPU: ${cpu}%`;
+        }
+
+        // ===== أوامر التيرمينال =====
+        function setupTerminalCommands() {
+            term.onData(data => {
+                const input = data.trim();
+                
+                if (data === '\x0C') { // Ctrl+L
+                    term.clear();
+                } else if (input === 'help') {
+                    toggleCommandList();
+                } else if (input === 'start-macos') {
+                    startMacOS();
+                } else if (input === 'stop-macos') {
+                    dockerWorker.postMessage({type: 'stop'});
+                } else if (input === 'restart-macos') {
+                    dockerWorker.postMessage({type: 'restart'});
+                } else if (input.startsWith('set-ram')) {
+                    const ram = parseInt(input.split(' ')[1]);
+                    if (ram >= 2048 && ram <= 4096) {
+                        kvmWorker.postMessage({type: 'set-ram', ram});
+                    } else {
+                        term.writeln('\x1b[31m❌ خطأ: حجم الذاكرة يجب أن يكون بين 2048 و 4096\x1b[0m');
+                    }
+                } else if (input === 'install-python-git') {
+                    installEssentials();
+                } else if (input === 'run-install-script') {
+                    dockerWorker.postMessage({
+                        type: 'run-command',
+                        command: '/install_essentials.sh'
+                    });
+                } else if (input === 'create-snapshot') {
+                    const name = `snapshot-${Date.now()}`;
+                    kvmWorker.postMessage({type: 'snapshot', name});
+                } else if (input === 'restore-snapshot') {
+                    kvmWorker.postMessage({type: 'restore', name: 'latest'});
+                } else if (input === 'list-snapshots') {
+                    kvmWorker.postMessage({type: 'list-snapshots'});
+                } else if (input.startsWith('set-resolution')) {
+                    const res = input.split(' ')[1];
+                    dockerWorker.postMessage({
+                        type: 'run-command',
+                        command: `sudo nvram resolution="${res}"`
+                    });
+                } else if (input === 'neofetch') {
+                    dockerWorker.postMessage({
+                        type: 'run-command',
+                        command: 'neofetch'
+                    });
+                } else if (input === 'htop') {
+                    dockerWorker.postMessage({
+                        type: 'run-command',
+                        command: 'htop'
+                    });
+                } else if (input === 'python3') {
+                    dockerWorker.postMessage({
+                        type: 'run-command',
+                        command: 'python3'
+                    });
+                } else if (input === 'git') {
+                    dockerWorker.postMessage({
+                        type: 'run-command',
+                        command: 'git --help'
+                    });
+                } else if (input) {
+                    dockerWorker.postMessage({
+                        type: 'input',
+                        data: data
+                    });
+                }
+            });
+        }
+
+        // ===== بدء النظام =====
+        async function initializeSystem() {
+            try {
+                // إعداد مساحة مراقبة الموارد
+                const resourceMonitor = document.createElement('div');
+                resourceMonitor.id = 'resource-monitor';
+                resourceMonitor.style.position = 'absolute';
+                resourceMonitor.style.top = '5px';
+                resourceMonitor.style.right = '10px';
+                resourceMonitor.style.color = '#ff0';
+                document.getElementById('status-bar').appendChild(resourceMonitor);
+                
+                // إعداد زر المساعدة
+                document.getElementById('help-btn').addEventListener('click', toggleCommandList);
+                
+                // استعادة الجلسة السابقة
+                restoreSessionState();
+                
+                // الاتصال بجوجل درايف
+                if (await connectGoogleDrive()) {
+                    // تحميل نواة Linux
+                    if (await loadLinuxKernel()) {
+                        // تثبيت الأساسيات
+                        await installEssentials();
+                        
+                        // تهيئة KVM
+                        if (await setupKVM()) {
+                            // إعداد أوامر التيرمينال
+                            setupTerminalCommands();
+                            
+                            // بدء مراقبة الموارد
+                            startResourceMonitoring();
+                            
+                            // تفعيل الحفظ التلقائي
+                            setupAutoSave();
+                            
+                            // إعداد لوحة المفاتيح
+                            setupIOSKeyboard();
+                        }
+                    }
+                }
+            } catch (error) {
+                debugLog(`❌ خطأ فادح: ${error.message}`, 'error');
+                showLoadingMessage(`فشل التهيئة: ${error.message}`);
+            }
+        }
+
+        // بدء التشغيل عند تحميل الصفحة
+        window.addEventListener('load', initializeSystem);
+        
+        // ضبط حجم التيرمينال عند تغيير حجم النافذة
+        window.addEventListener('resize', () => {
+            if (isSystemReady) fitAddon.fit();
+        });
+    </script>
+</body>
+</html>
